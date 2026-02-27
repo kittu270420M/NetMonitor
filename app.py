@@ -7,24 +7,27 @@ import csv
 import os
 
 app = Flask(__name__)
-port = int(os.environ.get("PORT", 5000))
 
 scanner = nmap.PortScanner()
 mac_lookup = MacLookup()
 
 
-# ✅ Automatically detect network
+# Get network range automatically
 def get_network():
 
-    hostname = socket.gethostname()
-    local_ip = socket.gethostbyname(hostname)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    try:
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+    finally:
+        s.close()
 
     network = local_ip.rsplit('.', 1)[0] + ".0/24"
 
-    print("Scanning Network:", network)
+    print("Scanning network:", network)
 
     return network
-
 
 
 # Device type detection
@@ -32,21 +35,20 @@ def get_device_type(manufacturer):
 
     manufacturer = manufacturer.lower()
 
-    if "apple" in manufacturer or "samsung" in manufacturer or "xiaomi" in manufacturer:
+    if any(x in manufacturer for x in ["apple", "samsung", "xiaomi"]):
         return "Mobile"
 
-    elif "dell" in manufacturer or "lenovo" in manufacturer or "hp" in manufacturer:
+    elif any(x in manufacturer for x in ["dell", "lenovo", "hp"]):
         return "Laptop"
 
-    elif "tp-link" in manufacturer or "router" in manufacturer:
+    elif "tp-link" in manufacturer:
         return "Router"
 
     else:
         return "Unknown"
 
 
-
-# Main scan function
+# Scan network
 def scan_network():
 
     network = get_network()
@@ -63,12 +65,14 @@ def scan_network():
         manufacturer = "Unknown"
 
         try:
+
             mac = scanner[host]['addresses']['mac']
             manufacturer = mac_lookup.lookup(mac)
+
         except:
+
             pass
 
-        device_type = get_device_type(manufacturer)
 
         devices.append({
 
@@ -76,7 +80,7 @@ def scan_network():
             "name": hostname,
             "mac": mac,
             "manufacturer": manufacturer,
-            "type": device_type,
+            "type": get_device_type(manufacturer),
             "status": "Active",
             "last_seen": datetime.now().strftime("%H:%M:%S")
 
@@ -85,21 +89,22 @@ def scan_network():
     return devices
 
 
-
 @app.route("/")
 def index():
 
     devices = scan_network()
 
-    total = len(devices)
+    return render_template(
 
-    time = datetime.now().strftime("%d %b %Y, %H:%M:%S")
+        "index.html",
 
-    return render_template("index.html",
-                           devices=devices,
-                           total=total,
-                           time=time)
+        devices=devices,
 
+        total=len(devices),
+
+        time=datetime.now().strftime("%d %b %Y %H:%M:%S")
+
+    )
 
 
 @app.route("/export")
@@ -109,26 +114,36 @@ def export():
 
     filename = "devices.csv"
 
-    with open(filename, "w", newline="") as file:
+    with open(filename, "w", newline="") as f:
 
-        writer = csv.writer(file)
+        writer = csv.writer(f)
 
-        writer.writerow(["IP","Name","MAC","Manufacturer","Type","Last Seen"])
+        writer.writerow(
+
+            ["IP", "Name", "MAC", "Manufacturer", "Type", "Last Seen"]
+
+        )
 
         for d in devices:
 
-            writer.writerow([
-                d["ip"],
-                d["name"],
-                d["mac"],
-                d["manufacturer"],
-                d["type"],
-                d["last_seen"]
-            ])
+            writer.writerow(
+
+                [d["ip"], d["name"], d["mac"], d["manufacturer"],
+                 d["type"], d["last_seen"]]
+
+            )
 
     return send_file(filename, as_attachment=True)
 
 
 if __name__ == "__main__":
 
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+
+    app.run(
+
+        host="0.0.0.0",
+        port=port,
+        debug=True
+
+    )
